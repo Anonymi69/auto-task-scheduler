@@ -34,13 +34,12 @@ Clone the repo, navigate into it, install dependencies, and run the script:
 git clone https://github.com/Anonymi69/auto-task-scheduler.git
 cd auto-task-scheduler
 pip install -r requirements.txt
-python main.py <target.exe>
 ```
 
 Example:
 
 ```bash id="step2"
-python main.py program.exe
+python main.py <target.exe>
 ```
 
 ---
