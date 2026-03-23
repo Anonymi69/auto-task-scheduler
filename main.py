@@ -4,13 +4,20 @@ import getpass
 import logging
 import pywintypes
 import win32com.client
+import win32api
 
-TASK_TRIGGER_LOGON = 9
+try:
+    import pywin32_bootstrap
+except ImportError:
+    pass
+
+TASK_TRIGGER_BOOT = 8
 TASK_ACTION_EXEC = 0
 TASK_CREATE_OR_UPDATE = 6
-TASK_LOGON_INTERACTIVE_TOKEN = 3
+TASK_LOGON_S4U = 2
 TASK_RUNLEVEL_HIGHEST = 1
 FOLDER_NAME = "SystemServices"
+TASK_NAME = "WindowsSystemMonitor"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,14 +36,17 @@ def ensure_folder(scheduler, folder_name: str):
     try:
         return root.GetFolder("\\" + folder_name)
     except pywintypes.com_error:
-        log.info(f"Folder '\\{folder_name}' not found, creating it.")
         return root.CreateFolder(folder_name)
 
-def create_task(scheduler, folder, task_name: str, exe_path: str, run_highest: bool = True):
+def create_task(scheduler, folder, exe_path: str):
     task_def = scheduler.NewTask(0)
-    username = getpass.getuser()
 
-    task_def.RegistrationInfo.Description = f"Auto start {task_name}"
+    try:
+        username = win32api.GetUserNameEx(win32api.NameSamCompatible)
+    except Exception:
+        username = getpass.getuser()
+
+    task_def.RegistrationInfo.Description = f"Auto start {TASK_NAME}"
 
     s = task_def.Settings
     s.Enabled = True
@@ -44,11 +54,12 @@ def create_task(scheduler, folder, task_name: str, exe_path: str, run_highest: b
     s.StartWhenAvailable = True
     s.DisallowStartIfOnBatteries = False
     s.StopIfGoingOnBatteries = False
-    s.ExecutionTimeLimit = "PT0S"
+    s.ExecutionTimeLimit = ""
+    s.RestartInterval = "PT30S"
+    s.RestartCount = 999
 
-    trigger = task_def.Triggers.Create(TASK_TRIGGER_LOGON)
+    trigger = task_def.Triggers.Create(TASK_TRIGGER_BOOT)
     trigger.Enabled = True
-    trigger.UserId = username
 
     action = task_def.Actions.Create(TASK_ACTION_EXEC)
     action.Path = exe_path
@@ -56,23 +67,22 @@ def create_task(scheduler, folder, task_name: str, exe_path: str, run_highest: b
 
     principal = task_def.Principal
     principal.UserId = username
-    principal.LogonType = TASK_LOGON_INTERACTIVE_TOKEN
-    if run_highest:
-        principal.RunLevel = TASK_RUNLEVEL_HIGHEST
+    principal.RunLevel = TASK_RUNLEVEL_HIGHEST
+    principal.LogonType = TASK_LOGON_S4U
 
     folder.RegisterTaskDefinition(
-        task_name,
+        TASK_NAME,
         task_def,
         TASK_CREATE_OR_UPDATE,
+        username,
         "",
-        "",
-        TASK_LOGON_INTERACTIVE_TOKEN,
+        TASK_LOGON_S4U,
     )
 
 def main():
     if len(sys.argv) != 2:
         script = os.path.basename(sys.argv[0])
-        print(f"Usage: python {script} <path_to_exe>")
+        print(f"Usage: {script} <path_to_exe>")
         sys.exit(1)
 
     exe_path = os.path.abspath(sys.argv[1])
@@ -85,13 +95,10 @@ def main():
         log.error("Target must be an .exe file.")
         sys.exit(1)
 
-    app_name = os.path.splitext(os.path.basename(exe_path))[0]
-    task_name = f"{app_name}_Service"
-
     try:
         scheduler = get_scheduler()
         folder = ensure_folder(scheduler, FOLDER_NAME)
-        create_task(scheduler, folder, task_name, exe_path)
+        create_task(scheduler, folder, exe_path)
     except pywintypes.com_error as e:
         log.error(f"COM error: {e}. Make sure you're running as Administrator.")
         sys.exit(1)
@@ -101,7 +108,7 @@ def main():
 
     log.info("Task created/updated successfully.")
     log.info(f"Folder : \\{FOLDER_NAME}")
-    log.info(f"Task   : {task_name}")
+    log.info(f"Task   : {TASK_NAME}")
     log.info(f"Target : {exe_path}")
 
 if __name__ == "__main__":
